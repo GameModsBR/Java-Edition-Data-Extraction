@@ -1,8 +1,11 @@
 package net.fabricmc.example;
 
+import com.google.common.collect.ImmutableList;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.MinecraftVersion;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.state.property.Property;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.registry.Registry;
 
@@ -15,6 +18,43 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class ExampleMod implements ModInitializer {
+	private void simpleStates() {
+		HumanStringComparator humanStringComparator = new HumanStringComparator();
+		SortedMap<String, SortedMap<String, SortedSet<String>>> states = new TreeMap<>(humanStringComparator);
+		Registry.BLOCK.forEach(block -> {
+			Identifier blockId = Registry.BLOCK.getId(block);
+			ImmutableList<BlockState> mcStates = block.getStateManager().getStates();
+			String name = blockId.toString();
+			if (mcStates.isEmpty()) {
+				states.put(name, Collections.emptySortedMap());
+			} else {
+				SortedMap<String, SortedSet<String>> registeredProperties = states.computeIfAbsent(name, k-> new TreeMap<>(humanStringComparator));
+				for (BlockState mcState : mcStates) {
+					for (Property<?> property : mcState.getProperties()) {
+						SortedSet<String> registeredValues = registeredProperties.computeIfAbsent(property.getName().toLowerCase(), k -> new TreeSet<>(humanStringComparator));
+						registeredValues.add(mcState.get(property).toString().toLowerCase());
+					}
+				}
+			}
+		});
+
+		try(FileWriter fw = new FileWriter("block-states.ini"); BufferedWriter buffered = new BufferedWriter(fw)) {
+			for (Map.Entry<String, SortedMap<String, SortedSet<String>>> topLevelEntry : states.entrySet()) {
+				buffered.write("["+topLevelEntry.getKey()+"]");
+				buffered.newLine();
+				for (Map.Entry<String, SortedSet<String>> propertyEntry : topLevelEntry.getValue().entrySet()) {
+					buffered.write(propertyEntry.getKey());
+					buffered.write('=');
+					buffered.write(String.join(",", propertyEntry.getValue()));
+					buffered.newLine();
+				}
+				buffered.newLine();
+			}
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	//@Override
 	public void onInitialize() {
 		// This code runs as soon as Minecraft is in a mod-load-ready state.
@@ -22,22 +62,52 @@ public class ExampleMod implements ModInitializer {
 		// Proceed with mild caution.
 
 		System.out.println("Hello Fabric world!");
+
+		simpleStates();
+
+		SortedSet<String> simpleBlocks = new TreeSet<>();
+		SortedSet<String> blockStates = new TreeSet<>();
 		LinkedHashMap<String, String> properties = new LinkedHashMap<>();
 		Registry.BLOCK.forEach(block -> {
 			Identifier blockId = Registry.BLOCK.getId(block);
 			properties.put(blockId.toString(), "1,0");
-			block.getStateManager().getStates().forEach(blockState -> {
-				Set<String> stateProperties = Collections.newSetFromMap(new TreeMap<>());
-				blockState.getProperties().forEach(property ->
-						stateProperties.add(property.getName() + ':' + blockState.get(property).toString())
-				);
-				if (stateProperties.size() > 0) {
-					properties.put(blockId.toString() + ';' + String.join(";", stateProperties), "1,0");
-				}
-			});
+			BlockState defaultState = block.getDefaultState();
+			ImmutableList<BlockState> states = block.getStateManager().getStates();
+			if (states.size() == 1) {
+				blockStates.add(blockId.toString());
+				simpleBlocks.add(blockId.toString());
+			} else {
+				states.forEach(blockState -> {
+					Set<String> stateProperties = new TreeSet<>();
+					blockState.getProperties().forEach(property ->
+							stateProperties.add(property.getName() + ':' + blockState.get(property).toString())
+					);
+					String key = blockId.toString() + ';' + String.join(";", stateProperties);
+					properties.put(key, "1,0");
+					blockStates.add(key + (defaultState.equals(blockState)? ";!" : ""));
+				});
+			}
 		});
 
 		writeProperties(properties, "block-states.properties");
+
+		try (FileWriter fw = new FileWriter("block-states.txt"); BufferedWriter writer = new BufferedWriter(fw)) {
+			for (String blockState : blockStates) {
+				writer.write(blockState);
+				writer.newLine();
+			}
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+
+		try (FileWriter fw = new FileWriter("simple-blocks.txt"); BufferedWriter writer = new BufferedWriter(fw)) {
+			for (String blockState : simpleBlocks) {
+				writer.write(blockState);
+				writer.newLine();
+			}
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
 
 		properties.clear();
 		Registry.ITEM.forEach(item -> {

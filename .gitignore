@@ -24,3 +24,5 @@ bin/
 
 run/*
 !run/*.properties
+!run/block-states.*
+!run/simple-blocks*
